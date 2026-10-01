@@ -1,0 +1,5 @@
+stations.csv: fuel stations and place names from OpenStreetMap
+© OpenStreetMap contributors. Downloaded 2026-09-30 through the Overpass API.
+This database is made available under the Open Database License (ODbL) 1.0:
+https://opendatacommons.org/licenses/odbl/1-0/
+Built by tools/dev/stations/build.py in the Diadromi repository.
