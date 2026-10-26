@@ -18,6 +18,8 @@ import urllib.parse
 import urllib.request
 from collections import defaultdict
 
+from nomoi import unit_to_nomos
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, 'stations.csv')
 LICENCE = os.path.join(ROOT, 'stations-ODbL.txt')
@@ -33,6 +35,10 @@ QUERIES = {
     'fuel.json': '[out:json][timeout:180];' + AREA + 'nwr["amenity"="fuel"](area.a);out center tags;',
     'places.json': '[out:json][timeout:240];' + AREA +
                    'node["place"~"^(city|town|village|suburb|neighbourhood|quarter)$"](area.a);out tags center;',
+    # Each Greek regional unit's tags, then the ids of the stations inside it: the fuel bulletin's prefecture.
+    'units.json': '[out:json][timeout:300];area["ISO3166-1"="GR"][admin_level=2]->.gr;'
+                  'rel(area.gr)["boundary"="administrative"]["admin_level"="6"];map_to_area->.units;'
+                  'foreach.units->.u(.u out tags;nwr["amenity"="fuel"](area.u);out ids;);',
 }
 AREA_MAX_M = 5000
 SUBURB_MAX_M = 5000
@@ -84,6 +90,17 @@ def main():
     args = ap.parse_args()
     fuel = fetch('fuel.json', args.cache, args.retry_wait)['elements']
     places = [p for p in fetch('places.json', args.cache, args.retry_wait)['elements'] if p.get('tags', {}).get('name')]
+    # Station (type, id) → the bulletin's prefecture; Cyprus has none.
+    nomos_of = {}
+    current = None
+    for e in fetch('units.json', args.cache, args.retry_wait)['elements']:
+        if e['type'] == 'area':
+            name = e.get('tags', {}).get('name:el') or e.get('tags', {}).get('name', '')
+            current = unit_to_nomos(name)
+            if current is None:
+                print('unknown regional unit: %s' % name)
+        elif current:
+            nomos_of[(e['type'], e['id'])] = current
     grid = defaultdict(list)
     for p in places:
         grid[(int(p['lat'] * GRID), int(p['lon'] * GRID))].append(p)
@@ -112,18 +129,18 @@ def main():
         # e.g. «Ανάληψη» and «Θεσσαλονίκη» around «Φάληρο».
         wider = [nearest((lat, lon), SUBURB_MAX_M, ('suburb',)), nearest((lat, lon), TOWN_MAX_M, ('town', 'city'))]
         district = ', '.join(dict.fromkeys(w for w in wider if w and w != area))
-        rows.append([brand, area, t.get('addr:street', '').strip(), district, '%.5f' % lat, '%.5f' % lon])
+        rows.append([brand, area, t.get('addr:street', '').strip(), district, '%.5f' % lat, '%.5f' % lon, nomos_of.get((e['type'], e['id']), '')])
     rows.sort(key=lambda r: (float(r[4]), float(r[5])))
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator='\n')
-    w.writerow(['brand', 'area', 'street', 'district', 'lat', 'lon'])
+    w.writerow(['brand', 'area', 'street', 'district', 'lat', 'lon', 'nomos'])
     w.writerows(rows)
     open(OUT, 'w', encoding='utf-8', newline='').write(buf.getvalue())
     today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
     open(LICENCE, 'w', encoding='utf-8', newline='\n').write(LICENCE_TEXT.format(date=today))
-    print('%d stations, %d with a brand, %d with an area, %d with a district, %d bytes' %
+    print('%d stations, %d with a brand, %d with an area, %d with a district, %d with a prefecture, %d bytes' %
           (len(rows), sum(1 for r in rows if r[0]), sum(1 for r in rows if r[1]), sum(1 for r in rows if r[3]),
-           len(buf.getvalue().encode())))
+           sum(1 for r in rows if r[6]), len(buf.getvalue().encode())))
 
 
 if __name__ == '__main__':
