@@ -1,0 +1,37 @@
+name: Fuel prices
+
+# The Ministry publishes each day's bulletin the next morning; two runs a day pick it up.
+on:
+  schedule:
+    - cron: '0 8 * * *'
+    - cron: '0 14 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pdftotext
+        run: sudo apt-get install -y poppler-utils
+      - name: Read the newest bulletin
+        run: python prices.py
+      - name: Commit if the prices changed
+        run: |
+          if git diff --quiet -- fuel-prices.csv && git ls-files --error-unmatch fuel-prices.csv > /dev/null 2>&1; then
+            echo "No change"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add fuel-prices.csv
+          git commit -m "Fuel prices: $(sed -n '2p' fuel-prices.csv | cut -d, -f1)"
+          git pull --rebase
+          git push
