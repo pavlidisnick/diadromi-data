@@ -10,7 +10,8 @@ Public data for the [Diadromi](https://play.google.com/store/apps/details?id=com
   OpenStreetMap's regional units joined up in `nomoi.py`.
 - Served at <https://pavlidisnick.github.io/diadromi-data/stations.csv>. The app checks once a day whether it changed
   and downloads it only then; nothing about the user is sent.
-- Rebuilt every Monday at 03:00 UTC by `.github/workflows/stations.yml`: `build.py` queries the Overpass API,
+- Rebuilt every Monday at 03:00 UTC by `.github/workflows/stations.yml`: `build.py` queries the Overpass API
+  (overpass-api.de, falling back to overpass.kumi.systems; up to 6 tries over about 3 hours),
   `check.py` checks the result (columns, at least 5,000 stations, all inside Greece and Cyprus), and the file is
   committed only when it changed. A failed run leaves the last good list published.
 

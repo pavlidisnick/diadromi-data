@@ -2,7 +2,8 @@
 
 python build.py [--cache DIR] [--retry-wait SECONDS]
 With --cache, fuel.json and places.json in DIR are used if present, and saved there when downloaded.
-Each Overpass query is tried 3 times (Overpass often answers 504); the files are written only at the end,
+Each Overpass query is tried 6 times, waiting 10, 20, 40, 60, 60 minutes in between (Overpass often answers 504 or
+is unreachable for a while), alternating with a mirror; the files are written only at the end,
 so a failed run leaves the last good list in place.
 """
 import argparse
@@ -29,7 +30,10 @@ This database is made available under the Open Database License (ODbL) 1.0:
 https://opendatacommons.org/licenses/odbl/1-0/
 Built by build.py in https://github.com/pavlidisnick/diadromi-data
 '''
-TRIES = 3
+TRIES = 6
+MAX_WAIT = 3600
+# Same OpenStreetMap data; the mirror is tried on every second try in case the main server is down or blocks us.
+SERVERS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']
 AREA = '(area["ISO3166-1"="GR"][admin_level=2];area["ISO3166-1"="CY"][admin_level=2];)->.a;'
 QUERIES = {
     'fuel.json': '[out:json][timeout:180];' + AREA + 'nwr["amenity"="fuel"](area.a);out center tags;',
@@ -50,22 +54,22 @@ def fetch(name, cache, retry_wait):
     path = os.path.join(cache, name) if cache else None
     if path and os.path.isfile(path):
         return json.load(open(path, encoding='utf-8'))
-    req = urllib.request.Request(
-        'https://overpass-api.de/api/interpreter',
-        data=urllib.parse.urlencode({'data': QUERIES[name]}).encode(),
-        headers={'User-Agent': 'Diadromi-data/1.0 (https://github.com/pavlidisnick/diadromi-data)',
-                 'Accept': 'application/json'},
-    )
     for attempt in range(1, TRIES + 1):
+        req = urllib.request.Request(
+            SERVERS[(attempt - 1) % len(SERVERS)],
+            data=urllib.parse.urlencode({'data': QUERIES[name]}).encode(),
+            headers={'User-Agent': 'Diadromi-data/1.0 (https://github.com/pavlidisnick/diadromi-data)',
+                     'Accept': 'application/json'},
+        )
         try:
             raw = urllib.request.urlopen(req, timeout=300).read()
             json.loads(raw)
             break
         except Exception as e:  # 504s, timeouts, a cut-off answer
-            print('%s: try %d failed: %s' % (name, attempt, e), flush=True)
+            print('%s: try %d (%s) failed: %s' % (name, attempt, req.host, e), flush=True)
             if attempt == TRIES:
                 raise
-            time.sleep(retry_wait)
+            time.sleep(min(retry_wait * 2 ** (attempt - 1), MAX_WAIT))
     if path:
         os.makedirs(cache, exist_ok=True)
     if path:
